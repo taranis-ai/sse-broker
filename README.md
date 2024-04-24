@@ -2,8 +2,7 @@
 
 SSE Broker is a robust Server-Sent Events (SSE) broker designed to facilitate real-time communication between a distrubuted system and web clients.
 
-
-
+![sse_broker](https://github.com/taranis-ai/sse-broker/assets/6696618/0ec6d3e7-ffd5-42d5-b8dd-b848c0e88700)
 
 ## Installation
 
