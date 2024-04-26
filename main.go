@@ -38,8 +38,7 @@ func setupConfig() Config {
 	viper.AutomaticEnv()
 
 	config := Config{}
-	err := viper.Unmarshal(&config)
-	if err != nil {
+	if err := viper.Unmarshal(&config); err != nil {
 		log.Fatalf("Unable to decode config into struct, %v", err)
 	}
 	return config
@@ -88,35 +87,37 @@ func (app *App) publisher(w http.ResponseWriter, req *http.Request) {
 	app.publishMessage(message)
 }
 
-func (app *App) onSSESession(s *sse.Session) (sse.Subscription, bool) {
-	authHeader := s.Req.Header.Get("Authorization")
-	jwtQuery := s.Req.URL.Query().Get("jwt")
-	tokenString := ""
-	if authHeader != "" {
-		tokenString = authHeader
-	} else if jwtQuery != "" {
-		tokenString = jwtQuery
-	} else {
-		log.Printf("Unauthorized session: %s", s.Req.RemoteAddr)
-		s.Res.WriteHeader(http.StatusUnauthorized)
-		s.Res.Write([]byte("Authorization header is missing"))
-		return sse.Subscription{}, false
+func onSSESession(config Config) func(s *sse.Session) (sse.Subscription, bool) {
+	return func(s *sse.Session) (sse.Subscription, bool) {
+		authHeader := s.Req.Header.Get("Authorization")
+		jwtQuery := s.Req.URL.Query().Get("jwt")
+		tokenString := ""
+		if authHeader != "" {
+			tokenString = authHeader
+		} else if jwtQuery != "" {
+			tokenString = jwtQuery
+		} else {
+			log.Printf("Unauthorized session: %s", s.Req.RemoteAddr)
+			s.Res.WriteHeader(http.StatusUnauthorized)
+			s.Res.Write([]byte("Authorization header is missing"))
+			return sse.Subscription{}, false
+		}
+
+		if _, err := validateJWT(tokenString, config.JWTSecretKey); err != nil {
+			log.Printf("Invalid JWT: %s", err)
+			s.Res.WriteHeader(http.StatusUnauthorized)
+			s.Res.Write([]byte(err.Error()))
+			return sse.Subscription{}, false
+		}
+
+		log.Printf("New session: %s", s.Req.RemoteAddr)
+
+		return sse.Subscription{
+			Client:      s,
+			LastEventID: s.LastEventID,
+			Topics:      append(config.Topics, sse.DefaultTopic),
+		}, true
 	}
-
-	if _, err := validateJWT(tokenString, app.Config.JWTSecretKey); err != nil {
-		log.Printf("Invalid JWT: %s", err)
-		s.Res.WriteHeader(http.StatusUnauthorized)
-		s.Res.Write([]byte(err.Error()))
-		return sse.Subscription{}, false
-	}
-
-	log.Printf("New session: %s", s.Req.RemoteAddr)
-
-	return sse.Subscription{
-		Client:      s,
-		LastEventID: s.LastEventID,
-		Topics:      append(app.Config.Topics, sse.DefaultTopic),
-	}, true
 }
 
 func (app *App) setupRoutes() *http.ServeMux {
@@ -136,7 +137,7 @@ func main() {
 		},
 	}
 
-	app.SSEServer.OnSession = app.onSSESession
+	app.SSEServer.OnSession = onSSESession(config)
 
 	port := ":" + config.Port
 	log.Printf("Server started at %s", port)
