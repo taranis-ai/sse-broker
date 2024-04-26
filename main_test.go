@@ -73,7 +73,7 @@ func TestEventsEndpoint(t *testing.T) {
 		},
 	}
 
-	app.SSEServer.OnSession = app.onSSESession
+	app.SSEServer.OnSession = onSSESession(config)
 
 	req, err := http.NewRequest("GET", "/events", nil)
 	if err != nil {

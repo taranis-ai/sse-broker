@@ -19,6 +19,13 @@ go build -o sse-broker
 ./sse-broker
 ```
 
+Or just run the container
+
+```sh
+podman run --rm -it -p 8088:8088 ghcr.io/taranis-ai/sse-broker:latest
+```
+
+
 ## Usage
 
 **Publishing Events**
