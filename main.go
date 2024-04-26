@@ -10,14 +10,25 @@ import (
 	"github.com/tmaxmax/go-sse"
 )
 
-var sseServer *sse.Server
+type App struct {
+	Config    Config
+	SSEServer *sse.Server
+}
 
+type Config struct {
+	JWTSecretKey string   `mapstructure:"JWT_SECRET_KEY"`
+	APIKey       string   `mapstructure:"API_KEY"`
+	Port         string   `mapstructure:"PORT"`
+	SSEPath      string   `mapstructure:"SSE_PATH"`
+	PublishPath  string   `mapstructure:"PUBLISH_PATH"`
+	Topics       []string `mapstructure:"TOPICS"`
+}
 type Message struct {
 	Data  string `json:"data"`
 	Event string `json:"event"`
 }
 
-func setupConfig() {
+func setupConfig() Config {
 	viper.SetDefault("JWT_SECRET_KEY", "supersecret")
 	viper.SetDefault("API_KEY", "supersecret")
 	viper.SetDefault("PORT", "8088")
@@ -25,26 +36,33 @@ func setupConfig() {
 	viper.SetDefault("PUBLISH_PATH", "/publish")
 	viper.SetDefault("TOPICS", []string{})
 	viper.AutomaticEnv()
+
+	config := Config{}
+	err := viper.Unmarshal(&config)
+	if err != nil {
+		log.Fatalf("Unable to decode config into struct, %v", err)
+	}
+	return config
 }
 
-func validateJWT(tokenString string) (*jwt.Token, error) {
+func validateJWT(tokenString string, jwtKey string) (*jwt.Token, error) {
 	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte(viper.GetString("JWT_SECRET_KEY")), nil
+		return []byte(jwtKey), nil
 	})
 }
 
-func validateAPIKey(apiKey string) bool {
-	return apiKey == viper.GetString("API_KEY")
+func validateAPIKey(apiKey string, configApiKey string) bool {
+	return apiKey == configApiKey
 }
 
-func publishMessage(m Message) {
+func (app *App) publishMessage(m Message) {
 	message := &sse.Message{}
 	message.AppendData(m.Data)
 	message.Type = sse.Type(m.Event)
-	sseServer.Publish(message)
+	app.SSEServer.Publish(message)
 }
 
-func publisher(w http.ResponseWriter, req *http.Request) {
+func (app *App) publisher(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -56,7 +74,7 @@ func publisher(w http.ResponseWriter, req *http.Request) {
 	}
 
 	apiKey := req.Header.Get("X-API-KEY")
-	if !validateAPIKey(apiKey) {
+	if !validateAPIKey(apiKey, app.Config.APIKey) {
 		http.Error(w, "Invalid API key", http.StatusUnauthorized)
 		return
 	}
@@ -67,18 +85,25 @@ func publisher(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	publishMessage(message)
+	app.publishMessage(message)
 }
 
-func onSSESession(s *sse.Session) (sse.Subscription, bool) {
+func (app *App) onSSESession(s *sse.Session) (sse.Subscription, bool) {
 	authHeader := s.Req.Header.Get("Authorization")
-	if authHeader == "" {
+	jwtQuery := s.Req.URL.Query().Get("jwt")
+	tokenString := ""
+	if authHeader != "" {
+		tokenString = authHeader
+	} else if jwtQuery != "" {
+		tokenString = jwtQuery
+	} else {
 		log.Printf("Unauthorized session: %s", s.Req.RemoteAddr)
 		s.Res.WriteHeader(http.StatusUnauthorized)
 		s.Res.Write([]byte("Authorization header is missing"))
 		return sse.Subscription{}, false
 	}
-	if _, err := validateJWT(authHeader); err != nil {
+
+	if _, err := validateJWT(tokenString, app.Config.JWTSecretKey); err != nil {
 		log.Printf("Invalid JWT: %s", err)
 		s.Res.WriteHeader(http.StatusUnauthorized)
 		s.Res.Write([]byte(err.Error()))
@@ -87,28 +112,33 @@ func onSSESession(s *sse.Session) (sse.Subscription, bool) {
 
 	log.Printf("New session: %s", s.Req.RemoteAddr)
 
-	topics := viper.GetStringSlice("TOPICS")
-
 	return sse.Subscription{
 		Client:      s,
 		LastEventID: s.LastEventID,
-		Topics:      append(topics, sse.DefaultTopic),
+		Topics:      append(app.Config.Topics, sse.DefaultTopic),
 	}, true
 }
 
-func main() {
-	setupConfig()
+func (app *App) setupRoutes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc(app.Config.PublishPath, app.publisher)
+	mux.Handle(app.Config.SSEPath, app.SSEServer)
+	return mux
+}
 
-	sseServer = &sse.Server{
-		OnSession: onSSESession,
+func main() {
+	config := setupConfig()
+
+	app := &App{
+		Config: config,
+		SSEServer: &sse.Server{
+			OnSession: nil,
+		},
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(viper.GetString("PUBLISH_PATH"), publisher)
-	mux.Handle(viper.GetString("SSE_PATH"), sseServer)
+	app.SSEServer.OnSession = app.onSSESession
 
-	port := ":" + viper.GetString("PORT")
-
+	port := ":" + config.Port
 	log.Printf("Server started at %s", port)
-	log.Fatal(http.ListenAndServe(port, mux))
+	log.Fatal(http.ListenAndServe(port, app.setupRoutes()))
 }
