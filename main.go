@@ -23,6 +23,7 @@ type Config struct {
 	SSEPath      string   `mapstructure:"SSE_PATH"`
 	PublishPath  string   `mapstructure:"PUBLISH_PATH"`
 	Topics       []string `mapstructure:"TOPICS"`
+	Debug        bool     `mapstructure:"DEBUG"`
 }
 type Message struct {
 	Data  string `json:"data"`
@@ -36,6 +37,7 @@ func setupConfig() Config {
 	viper.SetDefault("SSE_PATH", "/events")
 	viper.SetDefault("PUBLISH_PATH", "/publish")
 	viper.SetDefault("TOPICS", []string{})
+	viper.SetDefault("DEBUG", false)
 	viper.AutomaticEnv()
 
 	config := Config{}
@@ -85,6 +87,10 @@ func (app *App) publisher(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if app.Config.Debug {
+		log.Printf("Publishing message: %v", message)
+	}
+
 	app.publishMessage(message)
 }
 
@@ -130,6 +136,10 @@ func (app *App) setupRoutes() *http.ServeMux {
 
 func main() {
 	config := setupConfig()
+
+	if config.Debug {
+		log.Printf("Config: %+v", config)
+	}
 
 	app := &App{
 		Config: config,
