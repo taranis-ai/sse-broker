@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/spf13/viper"
@@ -138,6 +139,15 @@ func main() {
 	}
 
 	app.SSEServer.OnSession = onSSESession(config)
+
+	go func() {
+		m := &sse.Message{}
+		m.AppendComment("keep-alive")
+
+		for range time.Tick(30 * time.Second) {
+			_ = app.SSEServer.Publish(m)
+		}
+	}()
 
 	port := ":" + config.Port
 	log.Printf("Server started at %s", port)
