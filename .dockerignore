@@ -1,9 +1,6 @@
 .vscode
 .idea
-Dockerfile
-Containerfile*
+Containerfile
 *.md
 LICENSE
-.gitlab-ci.yml
 .goreleaser.yml
-
