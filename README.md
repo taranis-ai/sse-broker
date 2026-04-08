@@ -25,6 +25,8 @@ Or just run the container
 podman run --rm -it -p 8088:8088 ghcr.io/taranis-ai/sse-broker:latest
 ```
 
+The published `ghcr.io/taranis-ai/sse-broker` image is built for `linux/amd64` and `linux/arm64`.
+
 
 ## Usage
 
